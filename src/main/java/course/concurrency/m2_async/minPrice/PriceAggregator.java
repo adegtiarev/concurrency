@@ -1,9 +1,17 @@
 package course.concurrency.m2_async.minPrice;
 
 import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class PriceAggregator {
+
+    private final ExecutorService executor = Executors.newFixedThreadPool(50);
 
     private PriceRetriever priceRetriever = new PriceRetriever();
 
@@ -19,6 +27,23 @@ public class PriceAggregator {
 
     public double getMinPrice(long itemId) {
         // place for your code
-        return 0;
+        List<CompletableFuture<Double>> futures = shopIds
+                .stream()
+                .map(shopId -> CompletableFuture.supplyAsync(() -> priceRetriever.getPrice(itemId, shopId), executor)
+                        .exceptionally(throwable -> null)
+                        .completeOnTimeout(null, 2900, TimeUnit.MILLISECONDS)
+                )
+                .toList();
+
+        CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+        CompletableFuture<Double> minFuture = allOf.thenApply(v ->
+                futures.stream()
+                        .map(CompletableFuture::join) // Извлекаем результаты
+                        .filter(Objects::nonNull)     // Фильтруем нулы
+                        .min(Double::compareTo)       // Находим минимальное значение
+                        .orElse(Double.NaN)
+        );
+        return minFuture.join();
     }
 }
